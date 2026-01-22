@@ -8,8 +8,9 @@ import json
 import math
 import re
 import six
-import tensorflow as tf
-
+import tensorflow.compat.v1 as tf
+# TF2 compatibility: keep TF1 graph/estimator code running under TF2
+tf.disable_v2_behavior()
 def get_shape_list(tensor, expected_rank=None, name=None):
 	"""Returns a list of the shape of tensor, preferring static dimensions.
 

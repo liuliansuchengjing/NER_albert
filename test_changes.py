@@ -1,5 +1,7 @@
 # coding=utf-8
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+# TF2 compatibility: keep TF1 graph/estimator code running under TF2
+tf.disable_v2_behavior()
 from modeling import embedding_lookup_factorized,transformer_model
 import os
 

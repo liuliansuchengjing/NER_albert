@@ -25,7 +25,9 @@ import math
 import re
 import numpy as np
 import six
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+# TF2 compatibility: keep TF1 graph/estimator code running under TF2
+tf.disable_v2_behavior()
 import bert_utils
 
 class BertConfig(object):
@@ -382,9 +384,21 @@ def dropout(input_tensor, dropout_prob):
 
 
 def layer_norm(input_tensor, name=None):
-  """Run layer normalization on the last dimension of the tensor."""
-  return tf.contrib.layers.layer_norm(
-      inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
+  """Run layer normalization on the last dimension of the tensor.
+
+  TF2 note: tf.contrib was removed. This is a TF1-style LayerNorm implemented
+  with explicit gamma/beta variables so it works with variable scopes & reuse.
+  """
+  with tf.variable_scope(name or "LayerNorm"):
+    # Static last-dim is preferred for variable shape
+    hidden_size = input_tensor.shape[-1].value
+    if hidden_size is None:
+      hidden_size = tf.shape(input_tensor)[-1]
+    gamma = tf.get_variable("gamma", [hidden_size], initializer=tf.ones_initializer())
+    beta = tf.get_variable("beta", [hidden_size], initializer=tf.zeros_initializer())
+    mean, variance = tf.nn.moments(input_tensor, axes=[-1], keep_dims=True)
+    normalized = (input_tensor - mean) / tf.sqrt(variance + 1e-12)
+    return normalized * gamma + beta
 
 
 def layer_norm_and_dropout(input_tensor, dropout_prob, name=None):

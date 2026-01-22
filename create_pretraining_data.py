@@ -21,7 +21,9 @@ from __future__ import print_function
 import collections
 import random
 import tokenization
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+# TF2 compatibility: keep TF1 graph/estimator code running under TF2
+tf.disable_v2_behavior()
 import jieba
 import re
 flags = tf.flags

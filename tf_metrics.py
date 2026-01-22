@@ -8,7 +8,9 @@ https://github.com/guillaumegenthial/tf_metrics/blob/master/tf_metrics/__init__.
 __author__ = "Guillaume Genthial"
 
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+# TF2 compatibility: keep TF1 graph/estimator code running under TF2
+tf.disable_v2_behavior()
 from tensorflow.python.ops.metrics_impl import _streaming_confusion_matrix
 
 

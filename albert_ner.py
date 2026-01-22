@@ -25,7 +25,9 @@ import os
 import modeling
 import optimization_finetuning as optimization
 import tokenization
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
+# TF2 compatibility: keep TF1 graph/estimator code running under TF2
+tf.disable_v2_behavior()
 import pickle
 import tf_metrics
 
@@ -408,7 +410,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training,
       d = d.shuffle(buffer_size=100)
 
     d = d.apply(
-        tf.contrib.data.map_and_batch(
+        tf.data.experimental.map_and_batch(
             lambda record: _decode_record(record, name_to_features),
             batch_size=batch_size,
             drop_remainder=drop_remainder))
@@ -457,9 +459,21 @@ def create_model(bert_config, is_training, input_ids, input_mask, segment_ids,
     return (loss, per_example_loss, logits,predict)
 
 def layer_norm(input_tensor, name=None):
-  """Run layer normalization on the last dimension of the tensor."""
-  return tf.contrib.layers.layer_norm(
-      inputs=input_tensor, begin_norm_axis=-1, begin_params_axis=-1, scope=name)
+  """Run layer normalization on the last dimension of the tensor.
+
+  TF2 note: tf.contrib was removed. This is a TF1-style LayerNorm implemented
+  with explicit gamma/beta variables so it works with variable scopes & reuse.
+  """
+  with tf.variable_scope(name or "LayerNorm"):
+    # Static last-dim is preferred for variable shape
+    hidden_size = input_tensor.shape[-1].value
+    if hidden_size is None:
+      hidden_size = tf.shape(input_tensor)[-1]
+    gamma = tf.get_variable("gamma", [hidden_size], initializer=tf.ones_initializer())
+    beta = tf.get_variable("beta", [hidden_size], initializer=tf.zeros_initializer())
+    mean, variance = tf.nn.moments(input_tensor, axes=[-1], keep_dims=True)
+    normalized = (input_tensor - mean) / tf.sqrt(variance + 1e-12)
+    return normalized * gamma + beta
 
 def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
                      num_train_steps, num_warmup_steps, use_tpu,
@@ -519,7 +533,7 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
       train_op = optimization.create_optimizer(
           total_loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu)
 
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      output_spec = tf.estimator.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
           train_op=train_op,
@@ -540,13 +554,13 @@ def model_fn_builder(bert_config, num_labels, init_checkpoint, learning_rate,
           #"eval_loss": loss,
         }
       eval_metrics = (metric_fn, [per_example_loss, label_ids, logits])
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      output_spec = tf.estimator.tpu.TPUEstimatorSpec(
           mode=mode,
           loss=total_loss,
           eval_metrics=eval_metrics,
           scaffold_fn=scaffold_fn)
     else:
-      output_spec = tf.contrib.tpu.TPUEstimatorSpec(
+      output_spec = tf.estimator.tpu.TPUEstimatorSpec(
           mode=mode,
           predictions= predicts,
           scaffold_fn=scaffold_fn)
@@ -665,18 +679,18 @@ def main(_):
 
   tpu_cluster_resolver = None
   if FLAGS.use_tpu and FLAGS.tpu_name:
-    tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
+    tpu_cluster_resolver = tf.distribute.cluster_resolver.TPUClusterResolver(
         FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project)
 
-  is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
+  is_per_host = tf.estimator.tpu.InputPipelineConfig.PER_HOST_V2
   # Cloud TPU: Invalid TPU configuration, ensure ClusterResolver is passed to tpu.
   print("###tpu_cluster_resolver:",tpu_cluster_resolver)
-  run_config = tf.contrib.tpu.RunConfig(
+  run_config = tf.estimator.tpu.RunConfig(
       cluster=tpu_cluster_resolver,
       master=FLAGS.master,
       model_dir=FLAGS.output_dir,
       save_checkpoints_steps=FLAGS.save_checkpoints_steps,
-      tpu_config=tf.contrib.tpu.TPUConfig(
+      tpu_config=tf.estimator.tpu.TPUConfig(
           iterations_per_loop=FLAGS.iterations_per_loop,
           num_shards=FLAGS.num_tpu_cores,
           per_host_input_for_training=is_per_host))
@@ -702,7 +716,7 @@ def main(_):
 
   # If TPU is not available, this will fall back to normal Estimator on CPU
   # or GPU.
-  estimator = tf.contrib.tpu.TPUEstimator(
+  estimator = tf.estimator.tpu.TPUEstimator(
       use_tpu=FLAGS.use_tpu,
       model_fn=model_fn,
       config=run_config,
